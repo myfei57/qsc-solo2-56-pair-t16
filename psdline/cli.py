@@ -102,7 +102,9 @@ def _cmd_demo(args: argparse.Namespace) -> int:
         "queued": {key: queued[key] for key in ("ok", "train_id")},
         "processed": processed,
         "swept": swept,
-        "batch": {key: batched[key] for key in ("ok", "order", "opened", "nearest")},
+        "batch": {
+            key: batched[key] for key in ("ok", "state", "order", "opened", "recalled", "nearest")
+        },
         "renumber": {key: renumber[key] for key in ("ok", "revision", "active_group")},
         "fault": fault,
         "cleared": cleared,

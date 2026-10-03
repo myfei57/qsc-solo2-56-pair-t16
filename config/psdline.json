@@ -24,7 +24,14 @@
     "batch_limit": 64,
     "open_hold_s": 30.0,
     "close_confirm_s": 6.0,
-    "lockout_release_s": 12.0
+    "lockout_release_s": 12.0,
+    "wave_size": 1,
+    "confirm_timeout_s": 5.0,
+    "confirm_poll_s": 0.2,
+    "max_open_gates": 24,
+    "confirm_budget_s": 2.0,
+    "backpressure": "count",
+    "recall_mode": "targeted"
   },
   "gap": {
     "confirm_s": 4.0,

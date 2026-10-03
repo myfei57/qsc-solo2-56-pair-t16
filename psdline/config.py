@@ -59,6 +59,13 @@ class DoorSection:
     open_hold_s: float = 30.0
     close_confirm_s: float = 6.0
     lockout_release_s: float = 12.0
+    wave_size: int = 1
+    confirm_timeout_s: float = 5.0
+    confirm_poll_s: float = 0.2
+    max_open_gates: int = 24
+    confirm_budget_s: float = 2.0
+    backpressure: str = "count"
+    recall_mode: str = "targeted"
 
 
 @dataclass(frozen=True)
@@ -157,6 +164,20 @@ class PlatformConfig:
             raise ConfigError("停站时长上限必须为正", component="config")
         if self.door.batch_limit <= 0:
             raise ConfigError("批量开门上限必须为正", component="config")
+        if self.door.wave_size <= 0:
+            raise ConfigError("放行波粒度必须为正", component="config")
+        if self.door.confirm_timeout_s <= 0:
+            raise ConfigError("放行确认超时必须为正", component="config")
+        if not 0 < self.door.confirm_poll_s <= self.door.confirm_timeout_s:
+            raise ConfigError("确认轮询间隔必须为正且不超过确认超时", component="config")
+        if self.door.max_open_gates <= 0:
+            raise ConfigError("站台开门数上限必须为正", component="config")
+        if self.door.confirm_budget_s <= 0:
+            raise ConfigError("确认耗时预算必须为正", component="config")
+        if self.door.backpressure not in ("count", "latency"):
+            raise ConfigError("背压方式必须是 count 或 latency", component="config")
+        if self.door.recall_mode not in ("targeted", "sweep"):
+            raise ConfigError("回收方式必须是 targeted 或 sweep", component="config")
         if self.gap.min_clearance_mm < 0:
             raise ConfigError("最小间隙不能为负", component="config")
         if self.signal.stale_after_s <= 0:

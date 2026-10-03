@@ -28,6 +28,8 @@ from .door import (
     open_group,
     process_queue,
     queued_total,
+    recover_all_releases,
+    release_progress,
 )
 from .errors import RailError
 from .eventbus import Event, EventBus
@@ -85,6 +87,7 @@ class Platform:
         config: PlatformConfig | None = None,
         clock: Clock | None = None,
         unit: str | None = None,
+        release_confirmer=None,
     ) -> None:
         self.config = (config or default_config()).validate()
         self.clock = clock or SystemClock()
@@ -133,6 +136,17 @@ class Platform:
             store, self.align, self.commands, self.gates, self.lockouts
         )
         self.doors.set_batch_limit(self.config.door.batch_limit)
+        self.doors.set_release_policy(
+            wave_size=self.config.door.wave_size,
+            confirm_timeout_s=self.config.door.confirm_timeout_s,
+            confirm_poll_s=self.config.door.confirm_poll_s,
+            max_open_gates=self.config.door.max_open_gates,
+            confirm_budget_s=self.config.door.confirm_budget_s,
+            backpressure=self.config.door.backpressure,
+            recall_mode=self.config.door.recall_mode,
+        )
+        if release_confirmer is not None:
+            self.doors.set_release_confirmer(release_confirmer)
 
         self._cycles = 0
         self._operations = 0
@@ -213,13 +227,15 @@ class Platform:
         )
 
     def _restore(self) -> None:
-        """从落盘状态恢复操作计数与锁定状态。"""
+        """从落盘状态恢复操作计数、锁定状态与未完成的放行。"""
 
         state = self.store.read("platform/state")
         if isinstance(state, dict):
             self._operations = int(state.get("operations", 0))
             self._cycles = int(state.get("cycles", 0))
         restore_lockouts(self.faults, self.gates, self.lockouts, not self.gaps.blocked_ids())
+        # 崩溃时半途的放行按进度文档收回关闭位，不留半开现场。
+        recover_all_releases(self.doors, self.clock, audit=self.audit)
 
     def _persist(self) -> None:
         """落盘平台计数，供重启后对照。"""
@@ -623,29 +639,41 @@ class Platform:
         return {"ok": verdict.advanced, "verdict": verdict.as_dict(), "violations": [] if verdict.advanced else [verdict.reason]}
 
     def batch_open(self, station_id: str) -> dict:
-        """按布局里程顺序批量开门。"""
+        """按布局里程顺序分区放行；前一波确认到位才放下一波。"""
 
         layout = self.layouts.get(station_id)
         zones = list(layout.zones) if layout else []
-        outcome = batch_open(self.doors, station_id, zones)
+        outcome = batch_open(self.doors, station_id, zones, clock=self.clock, audit=self.audit)
         nearest = nearest_zone(zones)
         self.audit.record(
             "batch_open",
             "",
             station_id,
+            release_id=outcome["release_id"],
+            state=outcome["state"],
             opened=len(outcome["opened"]),
+            recalled=len(outcome["recalled"]),
             skipped=len(outcome["skipped"]),
         )
         return {
-            "ok": not outcome["skipped"],
+            "ok": outcome["state"] == "done" and not outcome["skipped"],
             "station_id": station_id,
+            "release_id": outcome["release_id"],
+            "state": outcome["state"],
             "order": outcome["order"],
             "opened": outcome["opened"],
+            "recalled": outcome["recalled"],
             "deferred": outcome["deferred"],
             "skipped": outcome["skipped"],
+            "waves": outcome["waves"],
             "nearest": nearest.id if nearest else "",
-            "violations": [],
+            "violations": outcome["violations"],
         }
+
+    def release_progress(self, station_id: str) -> dict:
+        """读取站台的放行进度（门控、站台、审计共用同一份进度文档）。"""
+
+        return release_progress(self.doors, station_id)
 
     def sweep(self, station_id: str) -> dict:
         """整站清扫。"""
@@ -808,6 +836,7 @@ class Platform:
             "groups": group_keys(self.mappings, station_id),
             "active_group": active_group(self.doors, station_id),
             "pressure": open_pressure(self.doors, station_id),
+            "release": release_progress(self.doors, station_id),
         }
 
     def resolve_group(self, station_id: str, group_key: str) -> dict:
@@ -881,10 +910,11 @@ def build_platform(
     clock: Clock | None = None,
     storage_root: str | None = None,
     unit: str | None = None,
+    release_confirmer=None,
 ) -> Platform:
     """构造一个平台；``storage_root`` 可覆盖配置里的存储目录。"""
 
     base = config or default_config()
     if storage_root is not None:
         base = with_storage_root(base, storage_root)
-    return Platform(base, clock=clock, unit=unit)
+    return Platform(base, clock=clock, unit=unit, release_confirmer=release_confirmer)

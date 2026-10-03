@@ -73,6 +73,7 @@ class Api:
         add("GET", "/api/store", self._store)
         add("GET", "/api/mapping/{stationID}", self._mapping)
         add("GET", "/api/resolve", self._resolve)
+        add("GET", "/api/release", self._release)
         add("GET", "/api/readiness", self._readiness)
         add("POST", "/api/arrive", self._arrive)
         add("POST", "/api/depart", self._depart)
@@ -174,6 +175,9 @@ class Api:
         return self._platform.resolve_group(
             str(params.get("station_id", "")), str(params.get("group_key", ""))
         )
+
+    def _release(self, params: dict, body: dict) -> dict:
+        return self._platform.release_progress(_require(params, "station_id"))
 
     def _readiness(self, params: dict, body: dict) -> dict:
         checks = {

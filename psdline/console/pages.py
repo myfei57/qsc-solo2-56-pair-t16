@@ -159,6 +159,17 @@ def _door_page(platform: Platform) -> str:
         ]
         or [("暂无", "-")],
     )
+    body += _table(
+        "分区放行",
+        [
+            (
+                station_id,
+                f"{item['state']} 已开 {len(item['opened'])} 区 收回 {len(item['recalled'])} 区",
+            )
+            for station_id, item in report["releases"].items()
+        ]
+        or [("暂无", "-")],
+    )
     return _shell("门控控制台", body)
 
 

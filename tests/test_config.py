@@ -54,6 +54,29 @@ def test_config_rejects_missing_namespace_stations():
     assert PlatformConfig().validate() is not None
 
 
+def test_config_rejects_bad_release_policy():
+    payload = config_to_mapping(default_config())
+    payload["door"]["wave_size"] = 0
+    with pytest.raises(ConfigError):
+        config_from_mapping(payload)
+    payload = config_to_mapping(default_config())
+    payload["door"]["confirm_poll_s"] = 99.0
+    with pytest.raises(ConfigError):
+        config_from_mapping(payload)
+    payload = config_to_mapping(default_config())
+    payload["door"]["max_open_gates"] = 0
+    with pytest.raises(ConfigError):
+        config_from_mapping(payload)
+    payload = config_to_mapping(default_config())
+    payload["door"]["backpressure"] = "random"
+    with pytest.raises(ConfigError):
+        config_from_mapping(payload)
+    payload = config_to_mapping(default_config())
+    payload["door"]["recall_mode"] = "drop"
+    with pytest.raises(ConfigError):
+        config_from_mapping(payload)
+
+
 def test_load_config_from_file(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config_to_mapping(default_config())), encoding="utf-8")
