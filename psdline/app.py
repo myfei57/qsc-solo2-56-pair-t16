@@ -15,8 +15,8 @@ from .clock import Clock, SystemClock
 from .config import PlatformConfig, default_config, with_storage_root
 from .door import (
     DoorController,
+    ReleasePolicy,
     active_group,
-    batch_open,
     close_and_audit,
     depart,
     depart_policy,
@@ -28,6 +28,10 @@ from .door import (
     open_group,
     process_queue,
     queued_total,
+    recover_releases,
+    release_progress,
+    release_summary,
+    run_release,
 )
 from .errors import RailError
 from .eventbus import Event, EventBus
@@ -213,13 +217,14 @@ class Platform:
         )
 
     def _restore(self) -> None:
-        """从落盘状态恢复操作计数与锁定状态。"""
+        """从落盘状态恢复操作计数、锁定状态与未完成的批量放行。"""
 
         state = self.store.read("platform/state")
         if isinstance(state, dict):
             self._operations = int(state.get("operations", 0))
             self._cycles = int(state.get("cycles", 0))
         restore_lockouts(self.faults, self.gates, self.lockouts, not self.gaps.blocked_ids())
+        recover_releases(self.doors, self.clock.now(), audit=self.audit)
 
     def _persist(self) -> None:
         """落盘平台计数，供重启后对照。"""
@@ -623,29 +628,72 @@ class Platform:
         return {"ok": verdict.advanced, "verdict": verdict.as_dict(), "violations": [] if verdict.advanced else [verdict.reason]}
 
     def batch_open(self, station_id: str) -> dict:
-        """按布局里程顺序批量开门。"""
+        """按里程分区批量开门：逐区放行、确认到位再放下一区，超时停下并回收。"""
 
         layout = self.layouts.get(station_id)
         zones = list(layout.zones) if layout else []
-        outcome = batch_open(self.doors, station_id, zones)
+        policy = ReleasePolicy(
+            mode=self.config.door.release_mode,
+            window=self.config.door.release_window,
+            confirm_timeout_s=self.config.door.release_confirm_s,
+            confirm_budget_s=self.config.door.release_budget_s,
+            recall_mode=self.config.door.recall_mode,
+        )
         nearest = nearest_zone(zones)
+        try:
+            progress = run_release(
+                self.doors,
+                station_id,
+                zones,
+                policy,
+                self.ids.labeled("release"),
+                self.clock,
+                audit=self.audit,
+            )
+        except RailError as error:
+            progress = release_progress(self.doors, station_id)
+            self.audit.record(
+                "batch_open", "", station_id, error=error.message, status=progress.get("status", "")
+            )
+            return {
+                "ok": False,
+                "station_id": station_id,
+                "order": progress.get("order", []),
+                "opened": [],
+                "deferred": progress.get("deferred", []),
+                "skipped": progress.get("skipped", {}),
+                "nearest": nearest.id if nearest else "",
+                "release": progress,
+                "violations": [error.message],
+            }
+        opened = [entry["zone"] for entry in progress["zones"] if entry["state"] == "confirmed"]
         self.audit.record(
             "batch_open",
             "",
             station_id,
-            opened=len(outcome["opened"]),
-            skipped=len(outcome["skipped"]),
+            opened=len(opened),
+            skipped=len(progress["skipped"]),
+            status=progress["status"],
         )
+        violations = []
+        if progress["status"] == "aborted":
+            violations.append(progress.get("reason", ""))
         return {
-            "ok": not outcome["skipped"],
+            "ok": progress["status"] == "done" and not progress["skipped"],
             "station_id": station_id,
-            "order": outcome["order"],
-            "opened": outcome["opened"],
-            "deferred": outcome["deferred"],
-            "skipped": outcome["skipped"],
+            "order": progress["order"],
+            "opened": opened,
+            "deferred": progress["deferred"],
+            "skipped": progress["skipped"],
             "nearest": nearest.id if nearest else "",
-            "violations": [],
+            "release": progress,
+            "violations": violations,
         }
+
+    def release_progress(self, station_id: str) -> dict:
+        """读取站台批量放行的同一份进度（门控、站台与审计共用）。"""
+
+        return release_progress(self.doors, station_id)
 
     def sweep(self, station_id: str) -> dict:
         """整站清扫。"""
@@ -808,6 +856,7 @@ class Platform:
             "groups": group_keys(self.mappings, station_id),
             "active_group": active_group(self.doors, station_id),
             "pressure": open_pressure(self.doors, station_id),
+            "release": release_summary(release_progress(self.doors, station_id)),
         }
 
     def resolve_group(self, station_id: str, group_key: str) -> dict:

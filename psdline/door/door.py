@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from ..psd import LockoutRegistry, PSDRegistry
 from ..store import CommandLog, JsonStore
 from ..train import AlignRegistry
@@ -26,6 +28,8 @@ class DoorController:
         self._batch_limit = 64
         self._opens = 0
         self._closes = 0
+        self._release_locks: dict[str, threading.Lock] = {}
+        self._release_guard = threading.Lock()
 
     @property
     def store(self) -> JsonStore:
@@ -82,3 +86,13 @@ class DoorController:
         """返回当前批量上限。"""
 
         return self._batch_limit
+
+    def release_lock(self, station_id: str) -> threading.Lock:
+        """返回某站台批量放行的互斥锁：同一站台串行，不同站台并行。"""
+
+        with self._release_guard:
+            lock = self._release_locks.get(station_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._release_locks[station_id] = lock
+            return lock

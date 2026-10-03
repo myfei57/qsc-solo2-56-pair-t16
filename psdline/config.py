@@ -59,6 +59,11 @@ class DoorSection:
     open_hold_s: float = 30.0
     close_confirm_s: float = 6.0
     lockout_release_s: float = 12.0
+    release_mode: str = "count"
+    release_window: int = 1
+    release_confirm_s: float = 6.0
+    release_budget_s: float = 2.0
+    recall_mode: str = "close"
 
 
 @dataclass(frozen=True)
@@ -157,6 +162,18 @@ class PlatformConfig:
             raise ConfigError("停站时长上限必须为正", component="config")
         if self.door.batch_limit <= 0:
             raise ConfigError("批量开门上限必须为正", component="config")
+        if self.door.release_mode not in ("count", "time"):
+            raise ConfigError("放行背压模式必须是 count 或 time", component="config")
+        if self.door.release_window <= 0:
+            raise ConfigError("放行窗口必须为正", component="config")
+        if self.door.release_confirm_s <= 0:
+            raise ConfigError("放行确认超时必须为正", component="config")
+        if self.door.release_budget_s <= 0:
+            raise ConfigError("确认耗时预算必须为正", component="config")
+        if self.door.release_budget_s > self.door.release_confirm_s:
+            raise ConfigError("确认耗时预算不能超过确认超时", component="config")
+        if self.door.recall_mode not in ("close", "sweep"):
+            raise ConfigError("回收模式必须是 close 或 sweep", component="config")
         if self.gap.min_clearance_mm < 0:
             raise ConfigError("最小间隙不能为负", component="config")
         if self.signal.stale_after_s <= 0:

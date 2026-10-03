@@ -24,7 +24,12 @@
     "batch_limit": 64,
     "open_hold_s": 30.0,
     "close_confirm_s": 6.0,
-    "lockout_release_s": 12.0
+    "lockout_release_s": 12.0,
+    "release_mode": "count",
+    "release_window": 1,
+    "release_confirm_s": 6.0,
+    "release_budget_s": 2.0,
+    "recall_mode": "close"
   },
   "gap": {
     "confirm_s": 4.0,

@@ -72,6 +72,7 @@ class Api:
         add("GET", "/api/trend", self._trend)
         add("GET", "/api/store", self._store)
         add("GET", "/api/mapping/{stationID}", self._mapping)
+        add("GET", "/api/release/{stationID}", self._release)
         add("GET", "/api/resolve", self._resolve)
         add("GET", "/api/readiness", self._readiness)
         add("POST", "/api/arrive", self._arrive)
@@ -169,6 +170,9 @@ class Api:
         if mapping is None:
             raise RailError(f"站台 {station_id} 没有门区映射", component="console")
         return mapping.as_dict()
+
+    def _release(self, params: dict, body: dict) -> dict:
+        return self._platform.release_progress(str(params.get("stationID", "")))
 
     def _resolve(self, params: dict, body: dict) -> dict:
         return self._platform.resolve_group(
